@@ -8,7 +8,10 @@ import (
 
 	"net"
 	"net/http"
+	"runtime"
 	"strings"
+
+	"sync"
 
 	mp "github.com/mackerelio/go-mackerel-plugin"
 	"github.com/montanaflynn/stats"
@@ -16,8 +19,8 @@ import (
 
 // MemoCountPlugin is mackerel plugin
 type MemoCountPlugin struct {
-	prefix string
-	url    string
+	prefix    string
+	url       string
 	accessNum int
 }
 
@@ -74,10 +77,22 @@ func (p *MemoCountPlugin) FetchMetrics() (map[string]float64, error) {
 	ret := make(map[string]float64)
 	url := p.url
 	result := make([]float64, 0)
+
+	wg := &sync.WaitGroup{}
+	cpus := runtime.NumCPU()
+	runtime.GOMAXPROCS(cpus)
+	sem := make(chan struct{}, 100)
 	for i := 1; i <= p.accessNum; i++ {
-		duration, _ := durationToFetch(url)
-		result = append(result, duration)
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			duration, _ := durationToFetch(url)
+			result = append(result, duration)
+			<-sem
+		}()
 	}
+	wg.Wait()
 
 	average, err := stats.Mean(result)
 	if err != nil {
@@ -108,7 +123,7 @@ func (p *MemoCountPlugin) FetchMetrics() (map[string]float64, error) {
 // Do the plugin
 func Do() {
 	var (
-		optPrefix = flag.String("metric-key-prefix", "RequestPressure", "Metric key prefix")
+		optPrefix    = flag.String("metric-key-prefix", "RequestPressure", "Metric key prefix")
 		optAccessNum = flag.Int("access-num", 20, "Access number")
 	)
 	flag.Usage = func() {
@@ -122,8 +137,8 @@ func Do() {
 	}
 
 	mp.NewMackerelPlugin(&MemoCountPlugin{
-		prefix: *optPrefix,
+		prefix:    *optPrefix,
 		accessNum: *optAccessNum,
-		url:    flag.Args()[0],
+		url:       flag.Args()[0],
 	}).Run()
 }
