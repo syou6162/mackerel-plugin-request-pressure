@@ -81,7 +81,7 @@ func (p *MemoCountPlugin) FetchMetrics() (map[string]float64, error) {
 	wg := &sync.WaitGroup{}
 	cpus := runtime.NumCPU()
 	runtime.GOMAXPROCS(cpus)
-	sem := make(chan struct{}, 100)
+	sem := make(chan struct{}, 10)
 	for i := 1; i <= p.accessNum; i++ {
 		wg.Add(1)
 		sem <- struct{}{}
