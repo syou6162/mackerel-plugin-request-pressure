@@ -59,7 +59,10 @@ var netClient = &http.Client{
 
 func durationToFetch(url string) (float64, error) {
 	start := time.Now()
-	resp, _ := netClient.Get(url)
+	resp, err := netClient.Get(url)
+	if err != nil {
+		return 0.0, err
+	}
 	defer resp.Body.Close()
 	end := time.Now()
 	return end.Sub(start).Seconds(), nil
