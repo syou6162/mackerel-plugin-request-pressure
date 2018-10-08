@@ -22,6 +22,7 @@ type MemoCountPlugin struct {
 	prefix    string
 	url       string
 	accessNum int
+	concurrentNum int
 }
 
 // MetricKeyPrefix interface for PluginWithPrefix
@@ -81,7 +82,7 @@ func (p *MemoCountPlugin) FetchMetrics() (map[string]float64, error) {
 	wg := &sync.WaitGroup{}
 	cpus := runtime.NumCPU()
 	runtime.GOMAXPROCS(cpus)
-	sem := make(chan struct{}, 10)
+	sem := make(chan struct{}, p.concurrentNum)
 	for i := 1; i <= p.accessNum; i++ {
 		wg.Add(1)
 		sem <- struct{}{}
@@ -125,6 +126,7 @@ func Do() {
 	var (
 		optPrefix    = flag.String("metric-key-prefix", "RequestPressure", "Metric key prefix")
 		optAccessNum = flag.Int("access-num", 20, "Access number")
+		optConcurrentNum = flag.Int("concurrent-num", 2, "Concurrent number")
 	)
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s [OPTION] url\n", os.Args[0])
@@ -139,6 +141,7 @@ func Do() {
 	mp.NewMackerelPlugin(&MemoCountPlugin{
 		prefix:    *optPrefix,
 		accessNum: *optAccessNum,
+		concurrentNum: *optConcurrentNum,
 		url:       flag.Args()[0],
 	}).Run()
 }
