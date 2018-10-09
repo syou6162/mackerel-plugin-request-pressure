@@ -6,18 +6,18 @@ import (
 	"os"
 	"time"
 
-	"net"
-	"net/http"
 	"strings"
 
 	mp "github.com/mackerelio/go-mackerel-plugin"
-	"github.com/montanaflynn/stats"
+	vegeta "github.com/tsenart/vegeta/lib"
 )
 
 // MemoCountPlugin is mackerel plugin
 type MemoCountPlugin struct {
-	prefix string
-	url    string
+	prefix      string
+	url         string
+	accessNum   int
+	durationSec int
 }
 
 // MetricKeyPrefix interface for PluginWithPrefix
@@ -44,59 +44,35 @@ func (p *MemoCountPlugin) GraphDefinition() map[string]mp.Graphs {
 	}
 }
 
-var netTransport = &http.Transport{
-	Dial: (&net.Dialer{
-		Timeout: 5 * time.Second,
-	}).Dial,
-	TLSHandshakeTimeout: 5 * time.Second,
-}
-
-// To disenable keep-alive, use custom http client
-var netClient = &http.Client{
-	Timeout:   time.Second * 10,
-	Transport: netTransport,
-}
-
-func durationToFetch(url string) (float64, error) {
-	start := time.Now()
-	resp, _ := netClient.Get(url)
-	defer resp.Body.Close()
-	end := time.Now()
-	return end.Sub(start).Seconds(), nil
-}
-
 // FetchMetrics interface for mackerelplugin
 func (p *MemoCountPlugin) FetchMetrics() (map[string]float64, error) {
 	ret := make(map[string]float64)
 	url := p.url
-	result := make([]float64, 0)
-	for i := 1; i <= 20; i++ {
-		duration, _ := durationToFetch(url)
-		result = append(result, duration)
-	}
 
-	average, err := stats.Mean(result)
-	if err != nil {
-		return nil, err
+	rate := vegeta.Rate{Freq: p.accessNum, Per: time.Second}
+	duration := time.Duration(p.durationSec) * time.Second
+	targeter := vegeta.NewStaticTargeter(vegeta.Target{
+		Method: "GET",
+		URL:    url,
+	})
+	attacker := vegeta.NewAttacker()
+
+	var metrics vegeta.Metrics
+	for res := range attacker.Attack(targeter, rate, duration, "Big Bang!") {
+		metrics.Add(res)
 	}
+	metrics.Close()
+
+	average := metrics.Latencies.Mean.Seconds()
 	ret["average"] = average
 
-	percentile90, err := stats.Percentile(result, 90)
-	if err != nil {
-		return nil, err
-	}
+	percentile90 := metrics.Latencies.Quantile(0.90).Seconds()
 	ret["90_percentile"] = percentile90
 
-	percentile95, err := stats.Percentile(result, 95)
-	if err != nil {
-		return nil, err
-	}
+	percentile95 := metrics.Latencies.P95.Seconds()
 	ret["95_percentile"] = percentile95
 
-	percentile99, err := stats.Percentile(result, 99)
-	if err != nil {
-		return nil, err
-	}
+	percentile99 := metrics.Latencies.P99.Seconds()
 	ret["99_percentile"] = percentile99
 	return ret, nil
 }
@@ -104,7 +80,9 @@ func (p *MemoCountPlugin) FetchMetrics() (map[string]float64, error) {
 // Do the plugin
 func Do() {
 	var (
-		optPrefix = flag.String("metric-key-prefix", "RequestPressure", "Metric key prefix")
+		optPrefix      = flag.String("metric-key-prefix", "RequestPressure", "Metric key prefix")
+		optAccessNum   = flag.Int("access-num", 2, "Access number")
+		optDurationSec = flag.Int("duration", 10, "duration seconds")
 	)
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s [OPTION] url\n", os.Args[0])
@@ -117,7 +95,9 @@ func Do() {
 	}
 
 	mp.NewMackerelPlugin(&MemoCountPlugin{
-		prefix: *optPrefix,
-		url:    flag.Args()[0],
+		prefix:      *optPrefix,
+		accessNum:   *optAccessNum,
+		durationSec: *optDurationSec,
+		url:         flag.Args()[0],
 	}).Run()
 }
