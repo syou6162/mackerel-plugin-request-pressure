@@ -9,4 +9,7 @@ lint: setup
 	go vet ./...
 	golint -set_exit_status ./...
 
-.PHONY: setup lint
+build:
+	go build
+
+.PHONY: setup lint build
